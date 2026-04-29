@@ -111,7 +111,6 @@ class IMAPConnection:
             self.imap.login(self.email, self.password)
             logger.info(f"Successfully logged into {self.name}")
             
-            # Identify as Thunderbird
             try:
                 self.imap.id("name", "Thunderbird", "version", "115.10.1", "vendor", "Mozilla", "os", sys.platform)
             except Exception as e:

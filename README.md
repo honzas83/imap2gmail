@@ -8,7 +8,6 @@ A robust Python script that continuously monitors a source IMAP account for new 
 - **Duplicate Prevention**: Uses a local SQLite database to track processed emails by UID and internal timestamp.
 - **Smart Startup**: Automatically skips all existing emails on the first run, syncing only new arrivals.
 - **Persistent Connections**: Maintains active IMAP sessions to reduce login overhead.
-- **Thunderbird Identity**: Identifies itself as a Mozilla Thunderbird client to the mail servers.
 - **Secure**: Uses environment variables for credentials (never hardcoded).
 
 ## Prerequisites
