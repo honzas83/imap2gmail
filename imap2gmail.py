@@ -1,3 +1,4 @@
+import re
 import os
 import time
 import sqlite3
@@ -182,8 +183,8 @@ def transfer_emails(source_conn, dest_conn):
             if is_processed(uid_str):
                 continue
 
-            # Fetch internal date first to compare
-            result, data = source_imap.uid('fetch', uid, '(INTERNALDATE RFC822)')
+            # Fetch flags, internal date and content
+            result, data = source_imap.uid('fetch', uid, '(FLAGS INTERNALDATE RFC822)')
             if result != 'OK' or not data or not data[0]:
                 continue
 
@@ -194,8 +195,26 @@ def transfer_emails(source_conn, dest_conn):
             if not raw_email:
                 continue
 
-            internal_date_tuple = imaplib.Internaldate2tuple(metadata)[0:6]
-            this_ts = datetime(*internal_date_tuple)
+            # Parse metadata
+            dt_tuple = imaplib.Internaldate2tuple(metadata)
+            this_ts = datetime(*dt_tuple[0:6])
+            dt_str = imaplib.Time2Internaldate(dt_tuple) if dt_tuple else None
+
+            # Parse and update flags
+            flags_match = re.search(rb'FLAGS \((.*?)\)', metadata)
+            flags = flags_match.group(1).decode('utf-8').split() if flags_match else []
+            
+            # Clean flags: filter out \Recent (server-set)
+            # We mark all transferred emails as Important in Gmail
+            is_important = True
+            cleaned_flags = []
+            for f in flags:
+                f_lower = f.lower()
+                if f_lower == '\\recent':
+                    continue
+                cleaned_flags.append(f)
+            
+            flags_str = "(" + " ".join(cleaned_flags) + ")"
 
             if last_ts and this_ts <= last_ts:
                 # Skip older emails and mark them processed to avoid re-fetching metadata
@@ -215,11 +234,29 @@ def transfer_emails(source_conn, dest_conn):
 
             # Push to destination
             logger.info(f"Transferring UID {uid_str} | Date: {this_ts} | From: {from_addr} | Subject: {subject}")
-            result, response = dest_imap.append('INBOX', None, None, raw_email)
+            result, response = dest_imap.append('INBOX', flags_str, dt_str, raw_email)
             
             if result == 'OK':
                 mark_as_processed(uid_str, this_ts)
                 logger.info(f"Successfully transferred UID {uid_str}")
+                
+                # Apply Gmail 'Important' label if needed
+                if is_important:
+                    try:
+                        # Ensure a folder is selected for STORE command
+                        dest_imap.select('INBOX')
+                        
+                        # Response looks like: [b'[APPENDUID 12345 67890] (Success)']
+                        for resp in response:
+                            if resp and b'APPENDUID' in resp:
+                                match = re.search(r'APPENDUID\s+\d+\s+(\d+)', resp.decode())
+                                if match:
+                                    new_uid = match.group(1)
+                                    dest_imap.uid('STORE', new_uid, '+X-GM-LABELS', '("\\\\Important")')
+                                    logger.info(f"Marked UID {uid_str} (New UID {new_uid}) as Important")
+                                    break
+                    except Exception as label_err:
+                        logger.warning(f"Failed to apply Important label to UID {uid_str}: {label_err}")
             else:
                 logger.error(f"Failed to append UID {uid_str}: {response}")
         
