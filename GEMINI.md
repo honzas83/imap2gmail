@@ -30,6 +30,8 @@ Required variables in `.env`:
 - `SOURCE_IMAP_SERVER`, `SOURCE_EMAIL`, `SOURCE_PASSWORD`
 - `DEST_IMAP_SERVER`, `DEST_EMAIL`, `DEST_PASSWORD` (App Password recommended for Gmail)
 - `CHECK_INTERVAL_SECONDS`
+- `EXCLUDE_IMPORTANT_SENDERS` (Comma-separated list of email addresses to skip "Important" marking)
+- `LOG_LEVEL` (Optional: INFO, DEBUG, WARNING, ERROR. Default: INFO)
 
 ## Maintenance Notes
 - **Database Schema**: The `processed_emails` table contains `uid` (Primary Key) and `internal_date` (ISO format string).

@@ -6,19 +6,23 @@ import imaplib
 import email
 import sys
 import logging
+from email.header import decode_header
+from email.utils import parseaddr
 from datetime import datetime
 from dotenv import load_dotenv
 
+# Load configuration
+load_dotenv()
+
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
+
 # Configure logging to stderr
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
     format='%(asctime)s - %(levelname)s - %(message)s',
     stream=sys.stderr
 )
 logger = logging.getLogger(__name__)
-
-# Load configuration
-load_dotenv()
 
 SOURCE_SERVER = os.getenv('SOURCE_IMAP_SERVER')
 SOURCE_EMAIL = os.getenv('SOURCE_EMAIL')
@@ -29,7 +33,24 @@ DEST_EMAIL = os.getenv('DEST_EMAIL')
 DEST_PASSWORD = os.getenv('DEST_PASSWORD')
 
 CHECK_INTERVAL = int(os.getenv('CHECK_INTERVAL_SECONDS', 60))
+EXCLUDE_IMPORTANT_SENDERS = [s.strip().lower() for s in os.getenv('EXCLUDE_IMPORTANT_SENDERS', '').split(',') if s.strip()]
 DB_PATH = 'processed.db'
+
+def decode_mime_header(header_value):
+    """Decodes MIME encoded headers like Subject or From."""
+    if not header_value:
+        return ""
+    decoded_parts = decode_header(header_value)
+    result_parts = []
+    for part, encoding in decoded_parts:
+        if isinstance(part, bytes):
+            try:
+                result_parts.append(part.decode(encoding or 'utf-8', errors='replace'))
+            except Exception:
+                result_parts.append(part.decode('utf-8', errors='replace'))
+        else:
+            result_parts.append(str(part))
+    return "".join(result_parts)
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -132,7 +153,7 @@ class IMAPConnection:
             self.imap = None
 
 def transfer_emails(source_conn, dest_conn):
-    logger.info("Checking for new emails...")
+    logger.debug("Checking for new emails...")
     try:
         source_imap = source_conn.connect()
         if not source_imap:
@@ -169,7 +190,7 @@ def transfer_emails(source_conn, dest_conn):
         uids = [u for u in uids if int(u) > max_uid]
         
         if not uids:
-            logger.info("No new emails found since last check.")
+            logger.debug("No new emails found since last check.")
             return
 
         logger.info(f"Found {len(uids)} potential new messages. Filtering by timestamp...")
@@ -222,10 +243,21 @@ def transfer_emails(source_conn, dest_conn):
                 continue
 
             new_count += 1
-            # Extract headers for logging
+            # Extract headers for logging and importance check
             msg = email.message_from_bytes(raw_email)
-            subject = msg.get('Subject', '(No Subject)')
-            from_addr = msg.get('From', '(Unknown Sender)')
+            raw_subject = msg.get('Subject', '(No Subject)')
+            raw_from = msg.get('From', '(Unknown Sender)')
+            
+            subject = decode_mime_header(raw_subject)
+            from_display = decode_mime_header(raw_from)
+            _, from_email = parseaddr(from_display.lower())
+
+            # Mark all transferred emails as Important in Gmail, 
+            # unless the sender is in the exclusion list.
+            is_important = True
+            if from_email in EXCLUDE_IMPORTANT_SENDERS:
+                is_important = False
+                logger.info(f"Sender {from_email} is excluded from Important.")
 
             if not dest_imap:
                 dest_imap = dest_conn.connect()
@@ -233,7 +265,7 @@ def transfer_emails(source_conn, dest_conn):
                     return
 
             # Push to destination
-            logger.info(f"Transferring UID {uid_str} | Date: {this_ts} | From: {from_addr} | Subject: {subject}")
+            logger.info(f"Transferring UID {uid_str} | Date: {this_ts} | From: {from_display} | Subject: {subject}")
             result, response = dest_imap.append('INBOX', flags_str, dt_str, raw_email)
             
             if result == 'OK':
@@ -261,7 +293,7 @@ def transfer_emails(source_conn, dest_conn):
                 logger.error(f"Failed to append UID {uid_str}: {response}")
         
         if new_count == 0:
-            logger.info("No new emails found since last check.")
+            logger.debug("No new emails found since last check.")
 
     except Exception as e:
         logger.error(f"Error during transfer: {e}")
@@ -288,7 +320,7 @@ def main():
     try:
         while True:
             transfer_emails(source_conn, dest_conn)
-            logger.info(f"Sleeping for {CHECK_INTERVAL} seconds...")
+            logger.debug(f"Sleeping for {CHECK_INTERVAL} seconds...")
             time.sleep(CHECK_INTERVAL)
     except KeyboardInterrupt:
         logger.info("Stopping script...")
