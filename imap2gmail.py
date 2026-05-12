@@ -33,6 +33,7 @@ DEST_EMAIL = os.getenv('DEST_EMAIL')
 DEST_PASSWORD = os.getenv('DEST_PASSWORD')
 
 CHECK_INTERVAL = int(os.getenv('CHECK_INTERVAL_SECONDS', 60))
+IMAP_TIMEOUT = int(os.getenv('IMAP_TIMEOUT_SECONDS', 30))
 EXCLUDE_IMPORTANT_SENDERS = [s.strip().lower() for s in os.getenv('EXCLUDE_IMPORTANT_SENDERS', '').split(',') if s.strip()]
 DB_PATH = 'processed.db'
 
@@ -129,7 +130,7 @@ class IMAPConnection:
                     self.disconnect()
 
             logger.info(f"Connecting to {self.name}: {self.server}")
-            self.imap = imaplib.IMAP4_SSL(self.server)
+            self.imap = imaplib.IMAP4_SSL(self.server, timeout=IMAP_TIMEOUT)
             self.imap.login(self.email, self.password)
             logger.info(f"Successfully logged into {self.name}")
             
