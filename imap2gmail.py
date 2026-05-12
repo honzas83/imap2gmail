@@ -148,6 +148,9 @@ class IMAPConnection:
     def disconnect(self):
         if self.imap:
             try:
+                # Set a very short timeout for logout to avoid hanging on shutdown
+                if self.imap.sock:
+                    self.imap.sock.settimeout(2.0)
                 self.imap.logout()
             except:
                 pass
