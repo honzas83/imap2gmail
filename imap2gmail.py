@@ -715,7 +715,7 @@ def transfer_emails(source_conn, dest_conn, plugins=None):
             if is_processed(uid_str):
                 continue
 
-            logger.info(f"UID {uid_str}: Zjistil jsem nový e-mail.")
+            logger.info(f"UID {uid_str}: Detected new email.")
 
             # Fetch flags, internal date and content
             result, data = source_imap.uid('fetch', uid, '(FLAGS INTERNALDATE RFC822)')
@@ -730,7 +730,7 @@ def transfer_emails(source_conn, dest_conn, plugins=None):
                 continue
 
             size_kb = len(raw_email) / 1024.0
-            logger.info(f"UID {uid_str}: Stáhnul jsem e-mail (velikost: {size_kb:.2f} KB).")
+            logger.info(f"UID {uid_str}: Downloaded email (Size: {size_kb:.2f} KB).")
 
             # Parse metadata
             dt_tuple = imaplib.Internaldate2tuple(metadata)
@@ -791,7 +791,7 @@ def transfer_emails(source_conn, dest_conn, plugins=None):
                 if hasattr(plugin, 'before_transfer'):
                     try:
                         if plugin.__class__.__name__ == 'OllamaClassifier' and plugin.enabled:
-                            logger.info(f"UID {uid_str}: Zpracovávám v Ollama...")
+                            logger.info(f"UID {uid_str}: Running Ollama classification...")
                         plugin.before_transfer(msg, context)
                     except Exception as pe:
                         logger.error(f"Plugin {plugin.__class__.__name__} before_transfer failed: {pe}")
@@ -808,7 +808,7 @@ def transfer_emails(source_conn, dest_conn, plugins=None):
                     return
 
             # Push to destination
-            logger.info(f"UID {uid_str}: Uploaduju...")
+            logger.info(f"UID {uid_str}: Uploading to destination...")
             logger.debug(f"Transferring UID {uid_str} | Date: {this_ts} | From: {from_display} | Subject: {subject} | Folder: {context['dest_folder']}")
             result, response = dest_imap.append(context["dest_folder"], flags_str, dt_str, raw_email)
             
@@ -816,7 +816,7 @@ def transfer_emails(source_conn, dest_conn, plugins=None):
             if result != 'OK' and context["is_spam"]:
                 logger.warning(f"Failed to append directly to {context['dest_folder']}. Retrying append to INBOX.")
                 context["dest_folder"] = 'INBOX'
-                logger.info(f"UID {uid_str}: Uploaduju...")
+                logger.info(f"UID {uid_str}: Uploading to destination...")
                 result, response = dest_imap.append(context["dest_folder"], flags_str, dt_str, raw_email)
 
             if result == 'OK':
@@ -877,12 +877,12 @@ def transfer_emails(source_conn, dest_conn, plugins=None):
                     if hasattr(plugin, 'after_transfer'):
                         try:
                             if plugin.__class__.__name__ == 'LocalSaver' and plugin.enabled:
-                                logger.info(f"UID {uid_str}: Ukládám v saver...")
+                                logger.info(f"UID {uid_str}: Saving locally via LocalSaver...")
                             plugin.after_transfer(msg, context)
                         except Exception as pe:
                             logger.error(f"Plugin {plugin.__class__.__name__} after_transfer failed: {pe}")
                 
-                logger.info(f"UID {uid_str}: Hotovo.")
+                logger.info(f"UID {uid_str}: Finished processing.")
             else:
                 logger.error(f"Failed to append UID {uid_str}: {response}")
         
