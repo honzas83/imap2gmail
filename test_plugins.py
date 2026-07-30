@@ -293,6 +293,40 @@ local_saver:
             if os.path.exists(archive_dir):
                 shutil.rmtree(archive_dir)
 
+    def test_local_saver_none_timestamp(self):
+        config_path = "test_saver_none_ts.yaml"
+        archive_dir = "test_archive_none_ts"
+        config_content = f"""
+plugin_class: "LocalSaver"
+directory: "{archive_dir}"
+template: "{{year}}/{{month}}/{{date}}-{{subject_clean}}.eml"
+"""
+        with open(config_path, "w") as f:
+            f.write(config_content)
+
+        import shutil
+
+        try:
+            saver = LocalSaver(config_path)
+            self.assertTrue(saver.enabled)
+
+            # Raw email bytes containing a Date header
+            raw_email = b"Date: Sat, 30 May 2026 12:00:00 +0200\nSubject: Test None Timestamp\n\nBody"
+            saver.save(raw_email, None, "Sender <sender@example.com>", "Test None Timestamp")
+
+            # Check that it extracted the date correctly from the Date header (2026-05-30)
+            expected_dir = os.path.join(archive_dir, "2026", "05")
+            expected_file = os.path.join(expected_dir, "2026-05-30-Test-None-Timestamp.eml")
+            self.assertTrue(os.path.exists(expected_file))
+            with open(expected_file, 'rb') as f:
+                self.assertEqual(f.read(), raw_email)
+
+        finally:
+            if os.path.exists(config_path):
+                os.remove(config_path)
+            if os.path.exists(archive_dir):
+                shutil.rmtree(archive_dir)
+
     def test_local_saver_structured(self):
         config_path = "test_saver_struct.yaml"
         archive_dir = "test_archive_struct"

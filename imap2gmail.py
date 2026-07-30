@@ -213,6 +213,20 @@ class LocalSaver:
             return
         
         try:
+            if this_ts is None:
+                try:
+                    from email.utils import parsedate_to_datetime
+                    msg = email.message_from_bytes(raw_email)
+                    date_hdr = msg.get('Date')
+                    if date_hdr:
+                        this_ts = parsedate_to_datetime(date_hdr)
+                        if this_ts.tzinfo:
+                            this_ts = this_ts.replace(tzinfo=None)
+                except Exception:
+                    pass
+            if this_ts is None:
+                this_ts = datetime.now()
+
             # Extract date components
             year_str = this_ts.strftime("%Y")
             month_str = this_ts.strftime("%m")
