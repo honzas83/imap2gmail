@@ -223,6 +223,7 @@ class LocalSaver:
             name, email_addr = parseaddr(from_display)
             from_part = name if name else email_addr
             from_clean = self.sanitize_component(from_part, max_len=60)
+            from_short = self.sanitize_component(email_addr, max_len=60)
             
             # Sanitize subject
             subject_clean = self.sanitize_component(subject, max_len=100)
@@ -234,6 +235,7 @@ class LocalSaver:
                 day=day_str,
                 date=date_str,
                 from_clean=from_clean,
+                from_short=from_short,
                 subject_clean=subject_clean
             )
             

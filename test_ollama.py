@@ -336,6 +336,41 @@ local_saver:
             if os.path.exists(archive_dir):
                 shutil.rmtree(archive_dir)
 
+    def test_local_saver_from_short(self):
+        config_path = "test_saver_short.yaml"
+        archive_dir = "test_archive_short"
+        config_content = f"""
+plugin_class: "LocalSaver"
+directory: "{archive_dir}"
+template: "{{year}}/{{month}}/{{date}}-{{from_short}}-{{subject_clean}}.eml"
+"""
+        with open(config_path, "w") as f:
+            f.write(config_content)
+
+        import shutil
+        from datetime import datetime
+
+        try:
+            saver = LocalSaver(config_path)
+            self.assertTrue(saver.enabled)
+            self.assertEqual(saver.template, "{year}/{month}/{date}-{from_short}-{subject_clean}.eml")
+
+            # Save test message
+            this_ts = datetime(2026, 7, 30, 8, 0, 0)
+            saver.save(b"raw structured short", this_ts, "John Doe <john@example.com>", "Structured Subject Short")
+
+            expected_dir = os.path.join(archive_dir, "2026", "07")
+            expected_file = os.path.join(expected_dir, "2026-07-30-john@example.com-Structured-Subject-Short.eml")
+            self.assertTrue(os.path.exists(expected_file))
+            with open(expected_file, 'rb') as f:
+                self.assertEqual(f.read(), b"raw structured short")
+
+        finally:
+            if os.path.exists(config_path):
+                os.remove(config_path)
+            if os.path.exists(archive_dir):
+                shutil.rmtree(archive_dir)
+
 class TestImap2GmailPlugins(unittest.TestCase):
 
     def test_resolve_plugin_ollama(self):
