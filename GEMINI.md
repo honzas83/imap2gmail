@@ -37,3 +37,24 @@ Required variables in `.env`:
 - **Database Schema**: The `processed_emails` table contains `uid` (Primary Key) and `internal_date` (ISO format string).
 - **Migration Logic**: The script includes automatic `ALTER TABLE` logic to handle schema updates (e.g., adding the `internal_date` column).
 - **Logging**: All activity is logged to `stderr` with timestamps, including success/failure of logins and specific details (From/Subject) of transferred emails.
+
+## Ollama Classification & Filtering
+An optional classification step can process incoming emails using a local or remote Ollama model (defaulting to `gemma4:e4b`).
+
+### Configuration
+1. Set the path to your config YAML file in `.env` or as a CLI argument:
+   ```env
+   OLLAMA_CONFIG_PATH=ollama_config.yaml
+   ```
+   Or run the script with:
+   ```bash
+   .venv/bin/python imap2gmail.py --ollama-config ollama_config.yaml
+   ```
+2. Create `ollama_config.yaml` specifying:
+   - `ollama`: `endpoint`, `model` (default: `gemma4:e4b`), and optional `username` & `password` for `htdigest` authentication.
+   - `classification`: `prompt` template (can use `{subject}`, `{from_display}`, `{body}` variables) and `schema` representing the JSON schema for classification.
+
+### Output Actions
+- **important**: If classified as important, the Gmail system label `\Important` is assigned. If not important, it is explicitly removed. Note that hard exclusions in `EXCLUDE_IMPORTANT_SENDERS` still override the LLM.
+- **spam**: If classified as spam, the email is routed directly to the `[Gmail]/Spam` folder instead of `INBOX`.
+- **tags**: A list of custom strings that are assigned to the transferred email as Gmail labels (using the `+X-GM-LABELS` IMAP extension).

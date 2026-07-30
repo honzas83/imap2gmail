@@ -1,0 +1,44 @@
+ollama:
+  # The Ollama base endpoint URL
+  endpoint: "http://localhost:11434"
+  # The model to use for classification. Defaults to gemma4:e4b if not specified.
+  model: "gemma4:e4b"
+  # Optional htdigest credentials (username and password)
+  # username: "myuser"
+  # password: "mypassword"
+
+classification:
+  # The prompt template used to query the LLM. 
+  # You can use placeholders {subject}, {from_display}, {body}, {current_date}, and {schema} which will be filled automatically.
+  prompt: |
+    You are an assistant that classifies incoming emails.
+    Analyze the following email and respond with JSON matching this schema:
+    {schema}
+    
+    Current Date: {current_date}
+    From: {from_display}
+    Subject: {subject}
+
+    Body:
+    {body}
+  
+  # The JSON Schema defining the expected structure of the output.
+  # Do not modify the top-level keys ('important', 'spam', 'tags') as the transfer script relies on them.
+  schema:
+    type: object
+    properties:
+      important:
+        type: boolean
+        description: "True if the email contains important, urgent, or high-priority information."
+      spam:
+        type: boolean
+        description: "True if the email is spam, unsolicited advertising, or a phishing attempt."
+      tags:
+        type: array
+        items:
+          type: string
+        description: "List of descriptive category tags/labels to assign to the email (e.g., Receipts, Work, School)."
+    required:
+      - important
+      - spam
+      - tags
