@@ -221,6 +221,16 @@ class LocalSaver:
             
             # Parse From component
             name, email_addr = parseaddr(from_display)
+            if not email_addr:
+                # Fallback to regex if parseaddr fails due to unquoted commas
+                match = re.search(r'<([^>]+)>', from_display)
+                if match:
+                    email_addr = match.group(1).strip()
+                else:
+                    match_email = re.search(r'[\w\.\-]+@[\w\.\-]+\.\w+', from_display)
+                    if match_email:
+                        email_addr = match_email.group(0).strip()
+            
             from_part = name if name else email_addr
             from_clean = self.sanitize_component(from_part, max_len=60)
             from_short = self.sanitize_component(email_addr, max_len=60)
