@@ -8,6 +8,8 @@ from imap2gmail import (
     strip_html_tags,
     get_email_body,
     OllamaClassifier,
+    LocalSaver,
+    resolve_plugin,
     transfer_emails,
     DEFAULT_SCHEMA,
     DEFAULT_PROMPT
@@ -153,15 +155,14 @@ classification:
         
         # Mock Classifier
         classifier = MagicMock()
-        classifier.enabled = True
-        classifier.classify.return_value = {
-            "important": False,
-            "spam": True,
-            "tags": ["Urgent", "Finance"]
-        }
+        def mock_before_transfer(msg, context):
+            context["is_important"] = False
+            context["is_spam"] = True
+            context["tags"] = ["Urgent", "Finance"]
+        classifier.before_transfer = mock_before_transfer
         
         # Run transfer
-        transfer_emails(source_conn, dest_conn, classifier=classifier)
+        transfer_emails(source_conn, dest_conn, plugins=[classifier])
         
         # Verify it appended to [Gmail]/Spam folder
         dest_imap.append.assert_called_once()
@@ -231,6 +232,163 @@ classification:
             # Check model is updated
             self.assertEqual(classifier.model, "model_two")
             
+        finally:
+            if os.path.exists(config_path):
+                os.remove(config_path)
+
+class TestImap2GmailLocalSaver(unittest.TestCase):
+
+    def test_sanitize_component(self):
+        saver = LocalSaver(None)
+        # Test normal characters and space collapse
+        self.assertEqual(saver.sanitize_component("A simple test"), "A-simple-test")
+        # Test special characters and symbols
+        self.assertEqual(saver.sanitize_component("Hello/World!: how? are* you;"), "HelloWorld-how-are-you")
+        # Test email addresses and domains
+        self.assertEqual(saver.sanitize_component("test.user@domain-name.com"), "test.user@domain-name.com")
+        # Test truncation
+        self.assertEqual(saver.sanitize_component("a" * 150, max_len=50), "a" * 50)
+        # Test empty input fallback
+        self.assertEqual(saver.sanitize_component(""), "unnamed")
+
+    def test_local_saver_flat(self):
+        config_path = "test_saver_flat.yaml"
+        archive_dir = "test_archive_flat"
+        config_content = f"""
+local_saver:
+  enabled: true
+  directory: "{archive_dir}"
+  structure: "flat"
+"""
+        with open(config_path, "w") as f:
+            f.write(config_content)
+
+        import shutil
+        from datetime import datetime
+
+        try:
+            saver = LocalSaver(config_path)
+            self.assertTrue(saver.enabled)
+            self.assertEqual(saver.template, "{subject_clean}.eml")
+
+            # Save test message
+            this_ts = datetime(2026, 7, 30, 8, 0, 0)
+            saver.save(b"raw email content", this_ts, "Sender Name <sender@example.com>", "Test Flat EML Subject")
+
+            expected_file = os.path.join(archive_dir, "Test-Flat-EML-Subject.eml")
+            self.assertTrue(os.path.exists(expected_file))
+            with open(expected_file, 'rb') as f:
+                self.assertEqual(f.read(), b"raw email content")
+
+            # Save again to check conflict resolution
+            saver.save(b"second email content", this_ts, "Sender Name <sender@example.com>", "Test Flat EML Subject")
+            conflict_file = os.path.join(archive_dir, "Test-Flat-EML-Subject_1.eml")
+            self.assertTrue(os.path.exists(conflict_file))
+            with open(conflict_file, 'rb') as f:
+                self.assertEqual(f.read(), b"second email content")
+
+        finally:
+            if os.path.exists(config_path):
+                os.remove(config_path)
+            if os.path.exists(archive_dir):
+                shutil.rmtree(archive_dir)
+
+    def test_local_saver_structured(self):
+        config_path = "test_saver_struct.yaml"
+        archive_dir = "test_archive_struct"
+        config_content = f"""
+local_saver:
+  enabled: true
+  directory: "{archive_dir}"
+  structure: "structured"
+"""
+        with open(config_path, "w") as f:
+            f.write(config_content)
+
+        import shutil
+        from datetime import datetime
+
+        try:
+            saver = LocalSaver(config_path)
+            self.assertTrue(saver.enabled)
+            self.assertEqual(saver.template, "{year}/{month}/{date}-{from_clean}-{subject_clean}.eml")
+
+            # Save test message 1: Text in from header
+            this_ts = datetime(2026, 7, 30, 8, 0, 0)
+            saver.save(b"raw structured 1", this_ts, "John Doe <john@example.com>", "Structured Subject One")
+
+            expected_dir = os.path.join(archive_dir, "2026", "07")
+            expected_file = os.path.join(expected_dir, "2026-07-30-John-Doe-Structured-Subject-One.eml")
+            self.assertTrue(os.path.exists(expected_file))
+            with open(expected_file, 'rb') as f:
+                self.assertEqual(f.read(), b"raw structured 1")
+
+            # Save test message 2: Email only in from header
+            saver.save(b"raw structured 2", this_ts, "only-email@example.com", "Structured Subject Two")
+            expected_file_2 = os.path.join(expected_dir, "2026-07-30-only-email@example.com-Structured-Subject-Two.eml")
+            self.assertTrue(os.path.exists(expected_file_2))
+            with open(expected_file_2, 'rb') as f:
+                self.assertEqual(f.read(), b"raw structured 2")
+
+        finally:
+            if os.path.exists(config_path):
+                os.remove(config_path)
+            if os.path.exists(archive_dir):
+                shutil.rmtree(archive_dir)
+
+class TestImap2GmailPlugins(unittest.TestCase):
+
+    def test_resolve_plugin_ollama(self):
+        config_path = "test_plugin_ollama.yaml"
+        config_content = """
+plugin_class: "OllamaClassifier"
+endpoint: "http://localhost:11434"
+model: "test-model"
+"""
+        with open(config_path, "w") as f:
+            f.write(config_content)
+        try:
+            plugin = resolve_plugin(config_path)
+            self.assertIsInstance(plugin, OllamaClassifier)
+            self.assertEqual(plugin.model, "test-model")
+        finally:
+            if os.path.exists(config_path):
+                os.remove(config_path)
+
+    def test_resolve_plugin_local_saver(self):
+        config_path = "test_plugin_saver.yaml"
+        config_content = """
+plugin_class: "LocalSaver"
+directory: "./test_dir"
+template: "my-template.eml"
+"""
+        with open(config_path, "w") as f:
+            f.write(config_content)
+        try:
+            plugin = resolve_plugin(config_path)
+            self.assertIsInstance(plugin, LocalSaver)
+            self.assertEqual(plugin.template, "my-template.eml")
+        finally:
+            if os.path.exists(config_path):
+                os.remove(config_path)
+
+    def test_resolve_plugin_legacy_compatibility(self):
+        config_path = "test_plugin_legacy.yaml"
+        config_content = """
+ollama:
+  endpoint: "http://localhost:11434"
+local_saver:
+  enabled: true
+  directory: "./archive"
+"""
+        with open(config_path, "w") as f:
+            f.write(config_content)
+        try:
+            plugins = resolve_plugin(config_path)
+            self.assertIsInstance(plugins, list)
+            self.assertEqual(len(plugins), 2)
+            self.assertIsInstance(plugins[0], OllamaClassifier)
+            self.assertIsInstance(plugins[1], LocalSaver)
         finally:
             if os.path.exists(config_path):
                 os.remove(config_path)

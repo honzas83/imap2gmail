@@ -58,3 +58,30 @@ An optional classification step can process incoming emails using a local or rem
 - **important**: If classified as important, the Gmail system label `\Important` is assigned. If not important, it is explicitly removed. Note that hard exclusions in `EXCLUDE_IMPORTANT_SENDERS` still override the LLM.
 - **spam**: If classified as spam, the email is routed directly to the `[Gmail]/Spam` folder instead of `INBOX`.
 - **tags**: A list of custom strings that are assigned to the transferred email as Gmail labels (using the `+X-GM-LABELS` IMAP extension).
+
+## Local EML Saver
+An optional local archiving step saves transferred emails as `.eml` files on the local filesystem.
+
+### Configuration
+1. Set the path to your config YAML file in `.env` (using `CONFIG_PATH`) or as a CLI argument:
+   ```env
+   CONFIG_PATH=ollama_config.yaml
+   ```
+   Or run the script with:
+   ```bash
+   .venv/bin/python imap2gmail.py --config config.yaml
+   ```
+2. In the configuration YAML, define:
+   - `local_saver`:
+     - `enabled`: `true` or `false`
+     - `directory`: Target directory path for EML files.
+     - `structure`: Layout format, either `flat` or `structured`.
+
+### File Name & Structure Layouts
+- **Flat Layout (`flat`)**:
+  Saves files directly in the target directory as `{sanitized_subject}.eml`.
+- **Structured Layout (`structured`)**:
+  Saves files in nested directories by year and month: `{directory}/{YYYY}/{MM}/{YYYY-MM-DD}-{from}-{sanitized_subject}.eml`.
+  
+*Note*: Slashes, colons, and invalid characters are sanitized automatically. Field values are truncated (e.g., to 60-100 chars) to prevent filesystem filename length errors. Filename conflicts are resolved automatically by appending a numeric counter (e.g., `_1`, `_2`).
+

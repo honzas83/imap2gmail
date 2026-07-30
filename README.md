@@ -44,30 +44,44 @@ A robust Python script that continuously monitors a source IMAP account for new 
    ```
    Edit `.env` and fill in your server details and credentials.
 
-## Ollama Classification & Filtering Configuration (Optional)
+## Plugin Architecture (Optional)
 
-You can enable LLM-based filtering, categorization, and routing of incoming emails by creating a YAML configuration file.
+`imap2gmail.py` supports a flexible plugin system. Plugins can hook into the email transfer lifecycle:
+1. `before_transfer(msg, context)`: Can inspect or modify properties (like `is_spam`, `tags`, `is_important`, `dest_folder`) before the email is copied.
+2. `after_transfer(msg, context)`: Runs after the email is successfully appended to Gmail (useful for archiving, local saves, notifications, etc.).
 
-1. Copy the example configuration:
-   ```bash
-   cp ollama_config.yaml.example ollama_config.yaml
-   ```
+Active plugins are configured in a comma-separated list in `.env`:
+```env
+PLUGINS=ollama_config.yaml,local_saver_config.yaml
+```
+Or passed via the `--plugins` command-line argument:
+```bash
+.venv/bin/python imap2gmail.py --plugins ollama_config.yaml,local_saver_config.yaml
+```
 
-2. Edit `ollama_config.yaml` to specify your Ollama endpoint, model, prompt, and JSON Schema.
+Each plugin configuration YAML must define a `plugin_class` key specifying the class name:
+- **Ollama Classification & Filtering**: `plugin_class: "OllamaClassifier"`
+- **Local EML Saver**: `plugin_class: "LocalSaver"`
 
-3. Enable it by setting the configuration path in `.env`:
-   ```env
-   OLLAMA_CONFIG_PATH=ollama_config.yaml
-   ```
-   Alternatively, pass the config path as a command-line argument:
-   ```bash
-   .venv/bin/python imap2gmail.py --ollama-config ollama_config.yaml
-   ```
+*(Backward compatibility: The legacy `--config` / `--ollama-config` parameters and single-file YAML layouts are still fully supported.)*
 
-### Classification Capabilities
+### 1. Ollama Classification & Filtering
+Enables LLM-based filtering, categorization, and routing of incoming emails. See `ollama_config.yaml.example` for details.
 - **Spam Control**: Emails classified as `spam: true` are directly routed to the Gmail `[Gmail]/Spam` folder instead of `INBOX`.
 - **Importance Control**: Emails marked as `important: true` receive the `\Important` system label. If marked as `false`, the script will explicitly remove the `\Important` label (override exclusions list still applies).
 - **Custom Tags**: Labels specified in the `tags` list output from the LLM are automatically mapped to custom Gmail labels using the `+X-GM-LABELS` extension.
+
+### 2. Local EML Saver
+Archives transferred emails as `.eml` files locally using a template-driven layout.
+Specify the target `directory` and a custom path `template` in your YAML config:
+```yaml
+plugin_class: "LocalSaver"
+directory: "./archive"
+# Supports {year}, {month}, {day}, {date}, {from_clean}, and {subject_clean}
+template: "{year}/{month}/{date}-{from_clean}-{subject_clean}.eml"
+```
+Filename conflicts are resolved automatically by appending `_1`, `_2`, etc. to the filename base before the extension.
+
 
 ## Usage
 

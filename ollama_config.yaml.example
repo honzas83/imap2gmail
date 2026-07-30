@@ -42,3 +42,14 @@ classification:
       - important
       - spam
       - tags
+
+local_saver:
+  # Enable or disable saving copies of emails locally as EML files
+  enabled: false
+  # Directory where EML files should be archived
+  directory: "./archive"
+  # Layout structure:
+  # - 'flat': saves as directory/subject.eml
+  # - 'structured': saves as directory/YYYY/MM/YYYY-MM-DD-from-subject.eml
+  structure: "structured"
+

@@ -124,6 +124,141 @@ def get_email_body(msg):
                     
     return body.strip()
 
+class LocalSaver:
+    """Saves transferred emails as EML files locally based on template-driven paths."""
+    def __init__(self, config_path):
+        self.config_path = config_path
+        self.config = None
+        self.enabled = False
+        self.directory = None
+        self.template = "{year}/{month}/{date}-{from_clean}-{subject_clean}.eml"
+        self.last_loaded_mtime = 0
+        
+        if yaml is None:
+            logger.error("PyYAML is not installed. LocalSaver cannot be loaded.")
+            return
+            
+        self.load_config()
+
+    def load_config(self):
+        if not self.config_path:
+            return
+        
+        try:
+            mtime = os.path.getmtime(self.config_path)
+            with open(self.config_path, 'r', encoding='utf-8') as f:
+                self.config = yaml.safe_load(f)
+            
+            # Support both new plugin format (root properties) and old format
+            if 'plugin_class' in self.config:
+                self.enabled = True
+                self.directory = self.config.get('directory')
+                struct = self.config.get('structure', 'structured').lower()
+                if struct == 'flat':
+                    default_tmpl = "{subject_clean}.eml"
+                else:
+                    default_tmpl = "{year}/{month}/{date}-{from_clean}-{subject_clean}.eml"
+                self.template = self.config.get('template', default_tmpl)
+            else:
+                saver_cfg = self.config.get('local_saver', {})
+                self.enabled = bool(saver_cfg.get('enabled', False))
+                self.directory = saver_cfg.get('directory')
+                struct = saver_cfg.get('structure', 'structured').lower()
+                if struct == 'flat':
+                    default_tmpl = "{subject_clean}.eml"
+                else:
+                    default_tmpl = "{year}/{month}/{date}-{from_clean}-{subject_clean}.eml"
+                self.template = saver_cfg.get('template', default_tmpl)
+            
+            if self.enabled and not self.directory:
+                logger.error("LocalSaver is enabled but target directory is not configured.")
+                self.enabled = False
+            
+            self.last_loaded_mtime = mtime
+            if self.enabled:
+                logger.info(f"LocalSaver loaded using config: {self.config_path}, target: {self.directory}, template: {self.template}")
+        except Exception as e:
+            logger.error(f"Failed to load/parse LocalSaver configuration: {e}")
+            self.enabled = False
+
+    def sanitize_component(self, text, max_len=80):
+        # Keep alphanumeric, spaces, dots, dashes, underscores, at-signs
+        clean = re.sub(r'[^\w\s\.\-\@]', '', text)
+        # Collapse whitespace/dashes into single dash
+        clean = re.sub(r'[\s\-]+', '-', clean)
+        clean = clean.strip('-')
+        # Truncate if too long
+        if len(clean) > max_len:
+            clean = clean[:max_len].rstrip('-')
+        return clean or "unnamed"
+
+    def after_transfer(self, msg, context):
+        if not self.enabled:
+            return
+        
+        self.save(context["raw_email"], context["this_ts"], context["from_display"], context["subject"])
+
+    def save(self, raw_email, this_ts, from_display, subject):
+        # Hot-reload configuration if modified
+        if self.config_path:
+            try:
+                mtime = os.path.getmtime(self.config_path)
+                if mtime > self.last_loaded_mtime:
+                    logger.info("Configuration file changed. Reloading LocalSaver configuration...")
+                    self.load_config()
+            except Exception as e:
+                logger.warning(f"Failed to check for config updates/reload: {e}")
+
+        if not self.enabled:
+            return
+        
+        try:
+            # Extract date components
+            year_str = this_ts.strftime("%Y")
+            month_str = this_ts.strftime("%m")
+            day_str = this_ts.strftime("%d")
+            date_str = this_ts.strftime("%Y-%m-%d")
+            
+            # Parse From component
+            name, email_addr = parseaddr(from_display)
+            from_part = name if name else email_addr
+            from_clean = self.sanitize_component(from_part, max_len=60)
+            
+            # Sanitize subject
+            subject_clean = self.sanitize_component(subject, max_len=100)
+            
+            # Format filename using configured template
+            relative_path = self.template.format(
+                year=year_str,
+                month=month_str,
+                day=day_str,
+                date=date_str,
+                from_clean=from_clean,
+                subject_clean=subject_clean
+            )
+            
+            final_path_base = os.path.join(self.directory, relative_path)
+            base, ext = os.path.splitext(final_path_base)
+            
+            # Ensure target directory exists
+            os.makedirs(os.path.dirname(final_path_base), exist_ok=True)
+            
+            # Resolve file conflicts
+            final_path = final_path_base
+            counter = 1
+            while os.path.exists(final_path):
+                final_path = f"{base}_{counter}{ext}"
+                counter += 1
+            
+            # Write raw email content to EML file
+            with open(final_path, 'wb') as f:
+                f.write(raw_email)
+                
+            logger.info(f"LocalSaver: Saved EML to {final_path}")
+            
+        except Exception as e:
+            logger.error(f"LocalSaver: Failed to save email: {e}")
+
 class OllamaClassifier:
     """Handles classification of emails using an Ollama server and optional HTTP Digest Auth."""
     def __init__(self, config_path):
@@ -155,27 +290,58 @@ class OllamaClassifier:
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 self.config = yaml.safe_load(f)
             
-            ollama_cfg = self.config.get('ollama', {})
-            self.endpoint = ollama_cfg.get('endpoint', 'http://localhost:11434')
-            self.model = ollama_cfg.get('model', 'gemma4:e4b')
+            # Support both new plugin format and legacy configuration layout
+            if 'plugin_class' in self.config:
+                self.endpoint = self.config.get('endpoint', 'http://localhost:11434')
+                self.model = self.config.get('model', 'gemma4:e4b')
+                username = self.config.get('username')
+                password = self.config.get('password')
+                self.prompt_template = self.config.get('prompt', DEFAULT_PROMPT)
+                self.schema = self.config.get('schema', DEFAULT_SCHEMA)
+            else:
+                ollama_cfg = self.config.get('ollama', {})
+                self.endpoint = ollama_cfg.get('endpoint', 'http://localhost:11434')
+                self.model = ollama_cfg.get('model', 'gemma4:e4b')
+                username = ollama_cfg.get('username')
+                password = ollama_cfg.get('password')
+                classification_cfg = self.config.get('classification', {})
+                self.prompt_template = classification_cfg.get('prompt', DEFAULT_PROMPT)
+                self.schema = classification_cfg.get('schema', DEFAULT_SCHEMA)
             
             # Auth
-            username = ollama_cfg.get('username')
-            password = ollama_cfg.get('password')
             if username and password:
                 self.auth = HTTPDigestAuth(username, password)
             else:
                 self.auth = None
             
-            classification_cfg = self.config.get('classification', {})
-            self.prompt_template = classification_cfg.get('prompt', DEFAULT_PROMPT)
-            self.schema = classification_cfg.get('schema', DEFAULT_SCHEMA)
             self.enabled = True
             self.last_loaded_mtime = mtime
-            logger.info(f"Ollama classification loaded using config: {self.config_path}, model: {self.model}")
+            logger.info(f"OllamaClassifier loaded using config: {self.config_path}, model: {self.model}")
         except Exception as e:
-            logger.error(f"Failed to load/parse Ollama configuration from {self.config_path}: {e}")
+            logger.error(f"Failed to load/parse Ollama configuration: {e}")
             self.enabled = False
+
+    def before_transfer(self, msg, context):
+        if not self.enabled:
+            return
+        
+        # Check exclusion list
+        from_display = context["from_display"]
+        _, from_email = parseaddr(from_display.lower())
+        
+        # Extract body
+        body = get_email_body(msg)
+        body_truncated = body[:4000]
+        
+        classification = self.classify(context["subject"], from_display, body_truncated)
+        if classification:
+            context["is_spam"] = classification.get('spam', False)
+            context["tags"] = classification.get('tags', [])
+            
+            if from_email in EXCLUDE_IMPORTANT_SENDERS:
+                context["is_important"] = False
+            else:
+                context["is_important"] = classification.get('important', context["is_important"])
 
     def classify(self, subject, from_display, body):
         # Hot-reload configuration if modified
@@ -186,13 +352,13 @@ class OllamaClassifier:
                     logger.info("Configuration file changed. Reloading Ollama configuration...")
                     self.load_config()
             except Exception as e:
-                logger.warning(f"Failed to check for config updates/reload: {e}")
+                logger.warning(f"Failed to check for updates: {e}")
 
         if not self.enabled:
             return None
         
         try:
-            # Formulate the prompt
+            # Formulate prompt
             try:
                 formatted_prompt = self.prompt_template.format(
                     from_display=from_display,
@@ -205,23 +371,17 @@ class OllamaClassifier:
                 logger.warning(f"KeyError formatting Ollama prompt: {ke}. Falling back to default format.")
                 formatted_prompt = f"{self.prompt_template}\n\nFrom: {from_display}\nSubject: {subject}\nBody: {body}"
             
-            # Ollama endpoint URL selection
+            # API endpoint selection
             endpoint = self.endpoint.rstrip('/')
             if not (endpoint.endswith('/api/chat') or endpoint.endswith('/api/generate')):
                 url = f"{endpoint}/api/chat"
             else:
                 url = endpoint
             
-            # Setup payload based on the URL type
             if url.endswith('/api/chat'):
                 payload = {
                     "model": self.model,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": formatted_prompt
-                        }
-                    ],
+                    "messages": [{"role": "user", "content": formatted_prompt}],
                     "stream": False,
                     "format": self.schema
                 }
@@ -243,12 +403,10 @@ class OllamaClassifier:
             elif 'response' in resp_json:
                 content = resp_json['response']
             else:
-                raise ValueError(f"Ollama response does not contain 'message.content' or 'response': {resp_json}")
+                raise ValueError(f"Ollama response does not contain content or response: {resp_json}")
             
-            # Parse structured JSON output
             result = json.loads(content)
             
-            # Normalization and defaults
             fallback_res = {
                 "important": True,
                 "spam": False,
@@ -268,6 +426,49 @@ class OllamaClassifier:
         except Exception as e:
             logger.warning(f"Ollama classification failed: {e}. Falling back to default settings.")
             return None
+
+
+def resolve_plugin(config_path):
+    """Loads a plugin configuration YAML and returns the instantiated plugin class."""
+    if not config_path or not os.path.exists(config_path):
+        logger.warning(f"Plugin configuration file not found: {config_path}")
+        return None
+        
+    try:
+        import yaml
+        with open(config_path, 'r', encoding='utf-8') as f:
+            cfg = yaml.safe_load(f)
+            
+        if not cfg:
+            logger.warning(f"Empty configuration YAML: {config_path}")
+            return None
+            
+        class_name = cfg.get('plugin_class')
+        
+        # Backward compatibility check for single-file config with 'ollama' or 'local_saver' keys
+        if not class_name:
+            instances = []
+            if 'ollama' in cfg or 'classification' in cfg:
+                logger.info(f"Backward compatibility: Loading OllamaClassifier from {config_path}")
+                instances.append(OllamaClassifier(config_path))
+            if 'local_saver' in cfg:
+                logger.info(f"Backward compatibility: Loading LocalSaver from {config_path}")
+                instances.append(LocalSaver(config_path))
+            return instances
+            
+        # Resolve class name dynamically
+        if '.' in class_name:
+            import importlib
+            module_name, resolved_class_name = class_name.rsplit('.', 1)
+            module = importlib.import_module(module_name)
+            plugin_class = getattr(module, resolved_class_name)
+        else:
+            plugin_class = globals()[class_name]
+            
+        return plugin_class(config_path)
+    except Exception as e:
+        logger.error(f"Failed to resolve/instantiate plugin from {config_path}: {e}")
+        return None
 
 
 def decode_mime_header(header_value):
@@ -432,8 +633,9 @@ def log_transfer_block(uid_str, new_uid, this_ts, from_display, subject, dest_fo
     )
     logger.info(block)
 
-def transfer_emails(source_conn, dest_conn, classifier=None):
+def transfer_emails(source_conn, dest_conn, plugins=None):
     logger.debug("Checking for new emails...")
+    plugins = plugins or []
     try:
         source_imap = source_conn.connect()
         if not source_imap:
@@ -537,63 +739,66 @@ def transfer_emails(source_conn, dest_conn, classifier=None):
                 is_important = False
                 logger.info(f"Sender {from_email} is excluded from Important.")
 
-            is_spam = False
-            tags = []
+            # Create context dictionary for plugins to read/write
+            context = {
+                "raw_email": raw_email,
+                "this_ts": this_ts,
+                "from_display": from_display,
+                "subject": subject,
+                "is_important": is_important,
+                "is_spam": False,
+                "tags": [],
+                "dest_folder": "INBOX",
+                "new_uid": None
+            }
 
-            # Perform Ollama classification if enabled
-            if classifier and classifier.enabled:
-                body = get_email_body(msg)
-                # Truncate body to prevent exceeding Ollama / context limits
-                body_truncated = body[:4000]
-                classification = classifier.classify(subject, from_display, body_truncated)
-                if classification:
-                    # Apply LLM classification decisions
-                    is_spam = classification.get('spam', False)
-                    tags = classification.get('tags', [])
-                    # The hard exclusion list takes precedence over LLM classification for 'important'
-                    if from_email in EXCLUDE_IMPORTANT_SENDERS:
-                        is_important = False
-                    else:
-                        is_important = classification.get('important', is_important)
+            # Call before_transfer hooks
+            for plugin in plugins:
+                if hasattr(plugin, 'before_transfer'):
+                    try:
+                        plugin.before_transfer(msg, context)
+                    except Exception as pe:
+                        logger.error(f"Plugin {plugin.__class__.__name__} before_transfer failed: {pe}")
+
+            # Re-resolve dest_folder after before_transfer hooks
+            if context["is_spam"]:
+                context["dest_folder"] = '"[Gmail]/Spam"'
+            else:
+                context["dest_folder"] = "INBOX"
 
             if not dest_imap:
                 dest_imap = dest_conn.connect()
                 if not dest_imap:
                     return
 
-            # Determine destination folder (Spam or Inbox)
-            dest_folder = 'INBOX'
-            if is_spam:
-                dest_folder = '"[Gmail]/Spam"'
-
             # Push to destination
-            logger.debug(f"Transferring UID {uid_str} | Date: {this_ts} | From: {from_display} | Subject: {subject} | Folder: {dest_folder}")
-            result, response = dest_imap.append(dest_folder, flags_str, dt_str, raw_email)
+            logger.debug(f"Transferring UID {uid_str} | Date: {this_ts} | From: {from_display} | Subject: {subject} | Folder: {context['dest_folder']}")
+            result, response = dest_imap.append(context["dest_folder"], flags_str, dt_str, raw_email)
             
             # Fallback if appending to spam folder fails
-            if result != 'OK' and is_spam:
-                logger.warning(f"Failed to append directly to {dest_folder}. Retrying append to INBOX.")
-                dest_folder = 'INBOX'
-                result, response = dest_imap.append(dest_folder, flags_str, dt_str, raw_email)
+            if result != 'OK' and context["is_spam"]:
+                logger.warning(f"Failed to append directly to {context['dest_folder']}. Retrying append to INBOX.")
+                context["dest_folder"] = 'INBOX'
+                result, response = dest_imap.append(context["dest_folder"], flags_str, dt_str, raw_email)
 
             if result == 'OK':
                 mark_as_processed(uid_str, this_ts)
                 
-                new_uid = None
                 # Apply labels / tags
                 try:
                     # Ensure the correct folder is selected for STORE command
-                    dest_imap.select(dest_folder)
+                    dest_imap.select(context["dest_folder"])
                     
                     # Response looks like: [b'[APPENDUID 12345 67890] (Success)']
                     for resp in response:
                         if resp and b'APPENDUID' in resp:
                             match = re.search(r'APPENDUID\s+\d+\s+(\d+)', resp.decode())
                             if match:
-                                new_uid = match.group(1)
+                                context["new_uid"] = match.group(1)
+                                new_uid = context["new_uid"]
                                 
                                 # Apply or remove standard Gmail 'Important' label
-                                if is_important:
+                                if context["is_important"]:
                                     dest_imap.uid('STORE', new_uid, '+X-GM-LABELS', '("\\\\Important")')
                                 else:
                                     try:
@@ -602,9 +807,9 @@ def transfer_emails(source_conn, dest_conn, classifier=None):
                                         logger.debug(f"Could not remove Important label: {remove_err}")
                                 
                                 # Apply other Gmail tags / labels assigned by LLM
-                                if tags:
+                                if context["tags"]:
                                     formatted_tags = []
-                                    for tag in tags:
+                                    for tag in context["tags"]:
                                         tag_cleaned = tag.strip().replace('"', '\\"')
                                         if tag_cleaned:
                                             formatted_tags.append(f'"{tag_cleaned}"')
@@ -617,7 +822,25 @@ def transfer_emails(source_conn, dest_conn, classifier=None):
                     logger.warning(f"Failed to apply labels/tags to UID {uid_str}: {label_err}")
 
                 # Call the detailed colorized multi-line log block
-                log_transfer_block(uid_str, new_uid, this_ts, from_display, subject, dest_folder, is_important, is_spam, tags)
+                log_transfer_block(
+                    uid_str, 
+                    context["new_uid"], 
+                    this_ts, 
+                    from_display, 
+                    subject, 
+                    context["dest_folder"], 
+                    context["is_important"], 
+                    context["is_spam"], 
+                    context["tags"]
+                )
+
+                # Call after_transfer hooks
+                for plugin in plugins:
+                    if hasattr(plugin, 'after_transfer'):
+                        try:
+                            plugin.after_transfer(msg, context)
+                        except Exception as pe:
+                            logger.error(f"Plugin {plugin.__class__.__name__} after_transfer failed: {pe}")
             else:
                 logger.error(f"Failed to append UID {uid_str}: {response}")
         
@@ -632,8 +855,12 @@ def transfer_emails(source_conn, dest_conn, classifier=None):
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="IMAP to Gmail Transfer Service")
+    parser.add_argument('--config', type=str, default=os.getenv('CONFIG_PATH'),
+                        help="Path to main configuration YAML file")
     parser.add_argument('--ollama-config', type=str, default=os.getenv('OLLAMA_CONFIG_PATH'),
-                        help="Path to Ollama configuration YAML file")
+                        help="Path to Ollama configuration YAML file (legacy option)")
+    parser.add_argument('--plugins', type=str, default=os.getenv('PLUGINS'),
+                        help="Comma-separated list of plugin config YAML files")
     args = parser.parse_args()
 
     if not all([SOURCE_SERVER, SOURCE_EMAIL, SOURCE_PASSWORD, DEST_EMAIL, DEST_PASSWORD]):
@@ -650,18 +877,33 @@ def main():
         logger.error("Initial connection failed. Please check your credentials and server settings.")
         sys.exit(1)
 
-    # Initialize classifier if config path is specified
-    classifier = None
-    if args.ollama_config:
-        classifier = OllamaClassifier(args.ollama_config)
-    else:
-        logger.info("Ollama classification is disabled (no configuration path provided).")
+    # Load plugins
+    plugins = []
+    
+    # 1. Check comma-separated PLUGINS environment variable or CLI arg
+    plugin_paths = []
+    if args.plugins:
+        plugin_paths = [p.strip() for p in args.plugins.split(',') if p.strip()]
+    
+    # 2. Check legacy configs (args.config, args.ollama_config) for compatibility
+    legacy_path = args.config if args.config else args.ollama_config
+    if legacy_path and legacy_path not in plugin_paths:
+        plugin_paths.append(legacy_path)
+        
+    # Resolve all configured plugins
+    for path in plugin_paths:
+        res = resolve_plugin(path)
+        if isinstance(res, list):
+            plugins.extend(res)
+        elif res:
+            plugins.append(res)
 
+    logger.info(f"Loaded {len(plugins)} active plugin(s).")
     logger.info("Starting IMAP to Gmail transfer loop with persistent connections...")
     
     try:
         while True:
-            transfer_emails(source_conn, dest_conn, classifier)
+            transfer_emails(source_conn, dest_conn, plugins)
             logger.debug(f"Sleeping for {CHECK_INTERVAL} seconds...")
             time.sleep(CHECK_INTERVAL)
     except KeyboardInterrupt:
