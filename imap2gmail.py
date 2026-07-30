@@ -729,8 +729,17 @@ def transfer_emails(source_conn, dest_conn, plugins=None):
             if not raw_email:
                 continue
 
+            # Extract headers for logging and importance check
+            msg = email.message_from_bytes(raw_email)
+            raw_subject = msg.get('Subject', '(No Subject)')
+            raw_from = msg.get('From', '(Unknown Sender)')
+            
+            subject = decode_mime_header(raw_subject)
+            from_display = decode_mime_header(raw_from)
+            _, from_email = parseaddr(from_display.lower())
+
             size_kb = len(raw_email) / 1024.0
-            logger.info(f"UID {uid_str}: Downloaded email (Size: {size_kb:.2f} KB).")
+            logger.info(f"UID {uid_str}: Downloaded email (Size: {size_kb:.2f} KB | From: {from_display} | Subject: {subject}).")
 
             # Parse metadata
             dt_tuple = imaplib.Internaldate2tuple(metadata)
@@ -757,14 +766,6 @@ def transfer_emails(source_conn, dest_conn, plugins=None):
                 continue
 
             new_count += 1
-            # Extract headers for logging and importance check
-            msg = email.message_from_bytes(raw_email)
-            raw_subject = msg.get('Subject', '(No Subject)')
-            raw_from = msg.get('From', '(Unknown Sender)')
-            
-            subject = decode_mime_header(raw_subject)
-            from_display = decode_mime_header(raw_from)
-            _, from_email = parseaddr(from_display.lower())
 
             # Mark all transferred emails as Important in Gmail, 
             # unless the sender is in the exclusion list.
