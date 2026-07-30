@@ -362,7 +362,28 @@ class OllamaClassifier:
         body = get_email_body(msg)
         body_truncated = body[:4000]
         
-        classification = self.classify(context["subject"], from_display, body_truncated)
+        # Extract recipients
+        raw_to = msg.get('To', '')
+        raw_cc = msg.get('Cc', '')
+        
+        to_display = decode_mime_header(raw_to)
+        cc_display = decode_mime_header(raw_cc)
+        
+        rec_parts = []
+        if to_display:
+            rec_parts.append(f"To: {to_display}")
+        if cc_display:
+            rec_parts.append(f"Cc: {cc_display}")
+        recipients = ", ".join(rec_parts)
+        
+        classification = self.classify(
+            context["subject"], 
+            from_display, 
+            body_truncated,
+            to_display=to_display,
+            cc_display=cc_display,
+            recipients=recipients
+        )
         if classification:
             context["is_spam"] = classification.get('spam', False)
             context["tags"] = classification.get('tags', [])
@@ -372,7 +393,7 @@ class OllamaClassifier:
             else:
                 context["is_important"] = classification.get('important', context["is_important"])
 
-    def classify(self, subject, from_display, body):
+    def classify(self, subject, from_display, body, to_display="", cc_display="", recipients=""):
         # Hot-reload configuration if modified
         if self.config_path:
             try:
@@ -391,6 +412,9 @@ class OllamaClassifier:
             try:
                 formatted_prompt = self.prompt_template.format(
                     from_display=from_display,
+                    to_display=to_display,
+                    cc_display=cc_display,
+                    recipients=recipients,
                     subject=subject,
                     body=body,
                     current_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -398,7 +422,7 @@ class OllamaClassifier:
                 )
             except KeyError as ke:
                 logger.warning(f"KeyError formatting Ollama prompt: {ke}. Falling back to default format.")
-                formatted_prompt = f"{self.prompt_template}\n\nFrom: {from_display}\nSubject: {subject}\nBody: {body}"
+                formatted_prompt = f"{self.prompt_template}\n\nFrom: {from_display}\nTo: {to_display}\nCc: {cc_display}\nSubject: {subject}\nBody: {body}"
             
             # API endpoint selection
             endpoint = self.endpoint.rstrip('/')

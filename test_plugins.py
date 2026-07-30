@@ -236,6 +236,56 @@ classification:
             if os.path.exists(config_path):
                 os.remove(config_path)
 
+    @patch('requests.post')
+    def test_ollama_classifier_placeholders(self, mock_post):
+        config_path = 'test_config_placeholders.yaml'
+        config_content = """
+plugin_class: "OllamaClassifier"
+endpoint: "http://localhost:11434"
+model: "gemma4:e4b"
+prompt: "To: {to_display} | Cc: {cc_display} | Recipients: {recipients} | Subject: {subject}"
+schema:
+  type: object
+  properties:
+    important:
+      type: boolean
+"""
+        with open(config_path, 'w') as f:
+            f.write(config_content)
+        
+        try:
+            classifier = OllamaClassifier(config_path)
+            self.assertTrue(classifier.enabled)
+            
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = {
+                "message": {
+                    "content": '{"important": false}'
+                }
+            }
+            mock_post.return_value = mock_resp
+            
+            classifier.classify(
+                subject="Meeting",
+                from_display="Alice <alice@example.com>",
+                body="Hello",
+                to_display="Bob <bob@example.com>",
+                cc_display="Charlie <charlie@example.com>",
+                recipients="To: Bob <bob@example.com>, Cc: Charlie <charlie@example.com>"
+            )
+            
+            mock_post.assert_called_once()
+            args, kwargs = mock_post.call_args
+            prompt_content = kwargs['json']['messages'][0]['content']
+            self.assertEqual(
+                prompt_content,
+                "To: Bob <bob@example.com> | Cc: Charlie <charlie@example.com> | Recipients: To: Bob <bob@example.com>, Cc: Charlie <charlie@example.com> | Subject: Meeting"
+            )
+            
+        finally:
+            if os.path.exists(config_path):
+                os.remove(config_path)
+
 class TestImap2GmailLocalSaver(unittest.TestCase):
 
     def test_sanitize_component(self):

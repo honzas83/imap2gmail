@@ -11,7 +11,7 @@ ollama:
 
 classification:
   # The prompt template used to query the LLM. 
-  # You can use placeholders {subject}, {from_display}, {body}, {current_date}, and {schema} which will be filled automatically.
+  # You can use placeholders {subject}, {from_display}, {to_display}, {cc_display}, {recipients}, {body}, {current_date}, and {schema} which will be filled automatically.
   prompt: |
     You are an assistant that classifies incoming emails.
     Analyze the following email and respond with JSON matching this schema:
@@ -19,6 +19,8 @@ classification:
     
     Current Date: {current_date}
     From: {from_display}
+    To: {to_display}
+    Cc: {cc_display}
     Subject: {subject}
 
     Body:
