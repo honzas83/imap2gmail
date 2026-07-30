@@ -272,6 +272,7 @@ class OllamaClassifier:
         self.prompt_template = None
         self.schema = None
         self.enabled = False
+        self.timeout = 30
         self.last_loaded_mtime = 0
         
         if yaml is None:
@@ -300,12 +301,14 @@ class OllamaClassifier:
                 password = self.config.get('password')
                 self.prompt_template = self.config.get('prompt', DEFAULT_PROMPT)
                 self.schema = self.config.get('schema', DEFAULT_SCHEMA)
+                self.timeout = int(self.config.get('timeout', 30))
             else:
                 ollama_cfg = self.config.get('ollama', {})
                 self.endpoint = ollama_cfg.get('endpoint', 'http://localhost:11434')
                 self.model = ollama_cfg.get('model', 'gemma4:e4b')
                 username = ollama_cfg.get('username')
                 password = ollama_cfg.get('password')
+                self.timeout = int(ollama_cfg.get('timeout', 30))
                 classification_cfg = self.config.get('classification', {})
                 self.prompt_template = classification_cfg.get('prompt', DEFAULT_PROMPT)
                 self.schema = classification_cfg.get('schema', DEFAULT_SCHEMA)
@@ -396,7 +399,7 @@ class OllamaClassifier:
                 }
             
             logger.debug(f"Sending request to Ollama: {url} with model {self.model}")
-            response = requests.post(url, json=payload, auth=self.auth, timeout=30)
+            response = requests.post(url, json=payload, auth=self.auth, timeout=self.timeout)
             response.raise_for_status()
             
             resp_json = response.json()

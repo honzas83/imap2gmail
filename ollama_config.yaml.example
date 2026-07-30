@@ -3,6 +3,8 @@ ollama:
   endpoint: "http://localhost:11434"
   # The model to use for classification. Defaults to gemma4:e4b if not specified.
   model: "gemma4:e4b"
+  # Timeout in seconds for Ollama requests. Defaults to 30.
+  timeout: 30
   # Optional htdigest credentials (username and password)
   # username: "myuser"
   # password: "mypassword"
