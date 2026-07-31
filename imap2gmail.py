@@ -458,7 +458,15 @@ class OllamaClassifier:
             else:
                 raise ValueError(f"Ollama response does not contain content or response: {resp_json}")
             
-            result = json.loads(content)
+            # Extract JSON substring if wrapped in markdown or prefix text
+            start_idx = content.find('{')
+            end_idx = content.rfind('}')
+            if start_idx != -1 and end_idx != -1:
+                json_str = content[start_idx:end_idx+1]
+            else:
+                json_str = content
+                
+            result = json.loads(json_str)
             
             fallback_res = {
                 "important": True,
