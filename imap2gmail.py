@@ -388,6 +388,9 @@ class OllamaClassifier:
         if not self.enabled:
             return
         
+        uid_str = context.get("uid", "Unknown")
+        logger.info(f"UID {uid_str}: Running Ollama classification...")
+        
         # Check exclusion list
         from_display = context["from_display"]
         _, from_email = parseaddr(from_display.lower())
@@ -412,9 +415,11 @@ class OllamaClassifier:
         
         # Determine if we should clean up the body text first
         cleaned_body = body_truncated
-        uid_str = context.get("uid", "Unknown")
         if self.cleanup_prompt:
+            logger.info(f"UID {uid_str}: Running email text cleanup/extraction...")
+            start_cleanup = time.time()
             before_size = len(body_truncated) / 1024.0
+            
             cleaned_body = self.cleanup_body(
                 context["subject"],
                 from_display,
@@ -423,8 +428,13 @@ class OllamaClassifier:
                 cc_display=cc_display,
                 recipients=recipients
             )
+            
+            duration_cleanup = time.time() - start_cleanup
             after_size = len(cleaned_body) / 1024.0
-            logger.info(f"UID {uid_str}: Cleaned email text (Size: {before_size:.2f} KB -> {after_size:.2f} KB)")
+            logger.info(f"UID {uid_str}: Cleaned email text (Size: {before_size:.2f} KB -> {after_size:.2f} KB, Duration: {duration_cleanup:.2f}s)")
+        
+        logger.info(f"UID {uid_str}: Running classification inference...")
+        start_classify = time.time()
         
         classification = self.classify(
             context["subject"], 
@@ -434,6 +444,10 @@ class OllamaClassifier:
             cc_display=cc_display,
             recipients=recipients
         )
+        
+        duration_classify = time.time() - start_classify
+        logger.info(f"UID {uid_str}: Classification inference finished (Duration: {duration_classify:.2f}s)")
+        
         if classification:
             context["is_spam"] = classification.get('spam', False)
             context["tags"] = classification.get('tags', [])
@@ -925,10 +939,6 @@ def transfer_emails(source_conn, dest_conn, plugins=None):
             for plugin in plugins:
                 if hasattr(plugin, 'before_transfer'):
                     try:
-                        if plugin.__class__.__name__ == 'OllamaClassifier' and plugin.enabled:
-                            if getattr(plugin, 'cleanup_prompt', None):
-                                logger.info(f"UID {uid_str}: Running email text cleanup/extraction...")
-                            logger.info(f"UID {uid_str}: Running Ollama classification...")
                         plugin.before_transfer(msg, context)
                     except Exception as pe:
                         logger.error(f"Plugin {plugin.__class__.__name__} before_transfer failed: {pe}")
