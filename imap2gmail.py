@@ -475,11 +475,10 @@ class OllamaClassifier:
         cleaned_text = self._query_ollama(formatted_prompt, use_schema=False)
         if cleaned_text:
             cleaned_text = cleaned_text.strip()
-            # If the model wraps it in markdown code block, extract the content
-            if cleaned_text.startswith('```') and cleaned_text.endswith('```'):
-                match = re.match(r'^```(?:\w+)?\n(.*?)\n```$', cleaned_text, re.DOTALL)
-                if match:
-                    cleaned_text = match.group(1).strip()
+            # If the model wraps it in a markdown code block (even with prefix/suffix text), extract the content
+            match = re.search(r'```(?:\w+)?\n(.*?)\n```', cleaned_text, re.DOTALL)
+            if match:
+                cleaned_text = match.group(1).strip()
             return cleaned_text
         return body
 

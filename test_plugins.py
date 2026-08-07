@@ -308,11 +308,11 @@ schema:
             classifier = OllamaClassifier(config_path)
             self.assertTrue(classifier.enabled)
             
-            # First response (cleanup text)
+            # First response (cleanup text wrapped in conversational prefix/suffix and code block)
             mock_resp_cleanup = MagicMock()
             mock_resp_cleanup.json.return_value = {
                 "message": {
-                    "content": "Cleaned message text"
+                    "content": "Here is the cleaned email body:\n```text\nCleaned message text\n```\nBest regards."
                 }
             }
             
