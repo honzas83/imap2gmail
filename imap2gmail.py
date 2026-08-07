@@ -91,7 +91,7 @@ Body:
 DEFAULT_CLEANUP_PROMPT = """You are an email cleanup assistant.
 Your task is to remove the history of previous messages (such as quoted replies, forwards, or older threads) from the email content below.
 Do not remove the current message's text, signatures, footers, disclaimers, greetings, or sign-offs, as they are important for classification.
-Return ONLY the current message's content. Do not wrap it in markdown block quotes (such as ```) or add conversational prefix/suffix text.
+Return ONLY the current message's content. Do not wrap it in markdown block quotes (such as ```) or add conversational prefix/suffix text. Do not apply any markdown formatting (such as bold, italics, or headers) to the output; return it strictly as raw plain text.
 
 Subject: {subject}
 From: {from_display}
