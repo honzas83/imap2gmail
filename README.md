@@ -11,7 +11,8 @@ A robust Python script that continuously monitors a source IMAP account for new 
 - **Secure**: Uses environment variables for credentials (never hardcoded).
 - **Ollama Classification & Filtering**: Optional real-time email classification using a local or remote Ollama model (default: `gemma4:e4b`).
   - Supports structured JSON output using native JSON Schema.
-  - Automatically formats prompts with placeholders: `{subject}`, `{from_display}`, `{body}`, `{current_date}`, and `{schema}`.
+  - Automatically formats prompts with placeholders: `{subject}`, `{from_display}`, `{to_display}`, `{cc_display}`, `{recipients}`, `{body}`, `{current_date}`, and `{schema}`.
+  - Supports an optional two-stage pipeline: cleans up previous message history (quotes/forwards) before executing classification.
   - Hot-reloads configuration YAML changes dynamically on the fly.
   - Beautiful colorized, multi-line card logging on the terminal separating email metadata from LLM outputs.
 
@@ -67,6 +68,9 @@ Each plugin configuration YAML must define a `plugin_class` key specifying the c
 
 ### 1. Ollama Classification & Filtering
 Enables LLM-based filtering, categorization, and routing of incoming emails. See `ollama_config.yaml.example` for details.
+- **Two-Stage Processing (Cleanup & Classification)**: To prevent context bloat and improve classification accuracy, you can enable a pre-classification cleanup phase. The LLM is first queried with a shorter `cleanup_prompt` to extract only the clean, newly written message text, stripping out previous thread history (quoted replies/forwards) while preserving the current signatures, greetings, and disclaimers. The classification prompt is then executed on the resulting cleaned message body.
+- **Configurable Cleanup**: Set `cleanup_prompt: true` to use the default cleanup prompt, specify a custom prompt string, or omit/set it to `false` to disable the cleanup stage.
+- **Configurable Context Size**: Control the maximum character limit of the email body text sent to Ollama using `max_body_chars` (defaults to `8192` characters).
 - **Spam Control**: Emails classified as `spam: true` are directly routed to the Gmail `[Gmail]/Spam` folder instead of `INBOX`.
 - **Importance Control**: Emails marked as `important: true` receive the `\Important` system label. If marked as `false`, the script will explicitly remove the `\Important` label (override exclusions list still applies).
 - **Custom Tags**: Labels specified in the `tags` list output from the LLM are automatically mapped to custom Gmail labels using the `+X-GM-LABELS` extension.
