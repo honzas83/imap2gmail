@@ -82,6 +82,16 @@ Subject: {subject}
 Body:
 {body}"""
 
+DEFAULT_CLEANUP_PROMPT = """You are an email cleanup assistant.
+Your task is to remove the history of previous messages (such as quoted replies, forwards, or older threads) from the email content below.
+Do not remove the current message's text, signatures, footers, disclaimers, greetings, or sign-offs, as they are important for classification.
+Return ONLY the current message's content. Do not wrap it in markdown block quotes (such as ```) or add conversational prefix/suffix text.
+
+Subject: {subject}
+From: {from_display}
+Email content:
+{body}"""
+
 def strip_html_tags(text):
     """Simple regex helper to strip HTML tags from email content."""
     clean = re.sub(r'<[^>]+>', ' ', text)
@@ -294,6 +304,7 @@ class OllamaClassifier:
         self.model = None
         self.auth = None
         self.prompt_template = None
+        self.cleanup_prompt = None
         self.schema = None
         self.enabled = False
         self.timeout = 30
@@ -324,6 +335,13 @@ class OllamaClassifier:
                 username = self.config.get('username')
                 password = self.config.get('password')
                 self.prompt_template = self.config.get('prompt', DEFAULT_PROMPT)
+                cleanup_val = self.config.get('cleanup_prompt')
+                if cleanup_val is True:
+                    self.cleanup_prompt = DEFAULT_CLEANUP_PROMPT
+                elif isinstance(cleanup_val, str) and cleanup_val.strip():
+                    self.cleanup_prompt = cleanup_val
+                else:
+                    self.cleanup_prompt = None
                 self.schema = self.config.get('schema', DEFAULT_SCHEMA)
                 self.timeout = int(self.config.get('timeout', 30))
             else:
@@ -335,6 +353,13 @@ class OllamaClassifier:
                 self.timeout = int(ollama_cfg.get('timeout', 30))
                 classification_cfg = self.config.get('classification', {})
                 self.prompt_template = classification_cfg.get('prompt', DEFAULT_PROMPT)
+                cleanup_val = classification_cfg.get('cleanup_prompt')
+                if cleanup_val is True:
+                    self.cleanup_prompt = DEFAULT_CLEANUP_PROMPT
+                elif isinstance(cleanup_val, str) and cleanup_val.strip():
+                    self.cleanup_prompt = cleanup_val
+                else:
+                    self.cleanup_prompt = None
                 self.schema = classification_cfg.get('schema', DEFAULT_SCHEMA)
             
             # Auth
@@ -376,10 +401,26 @@ class OllamaClassifier:
             rec_parts.append(f"Cc: {cc_display}")
         recipients = ", ".join(rec_parts)
         
+        # Determine if we should clean up the body text first
+        cleaned_body = body_truncated
+        uid_str = context.get("uid", "Unknown")
+        if self.cleanup_prompt:
+            before_size = len(body_truncated) / 1024.0
+            cleaned_body = self.cleanup_body(
+                context["subject"],
+                from_display,
+                body_truncated,
+                to_display=to_display,
+                cc_display=cc_display,
+                recipients=recipients
+            )
+            after_size = len(cleaned_body) / 1024.0
+            logger.info(f"UID {uid_str}: Cleaned email text (Size: {before_size:.2f} KB -> {after_size:.2f} KB)")
+        
         classification = self.classify(
             context["subject"], 
             from_display, 
-            body_truncated,
+            cleaned_body,
             to_display=to_display,
             cc_display=cc_display,
             recipients=recipients
@@ -392,6 +433,77 @@ class OllamaClassifier:
                 context["is_important"] = False
             else:
                 context["is_important"] = classification.get('important', context["is_important"])
+
+    def cleanup_body(self, subject, from_display, body, to_display="", cc_display="", recipients=""):
+        try:
+            formatted_prompt = self.cleanup_prompt.format(
+                from_display=from_display,
+                to_display=to_display,
+                cc_display=cc_display,
+                recipients=recipients,
+                subject=subject,
+                body=body,
+                current_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            )
+        except KeyError as ke:
+            logger.warning(f"KeyError formatting Ollama cleanup prompt: {ke}. Falling back to default format.")
+            formatted_prompt = f"{self.cleanup_prompt}\n\nFrom: {from_display}\nSubject: {subject}\nBody: {body}"
+        
+        cleaned_text = self._query_ollama(formatted_prompt, use_schema=False)
+        if cleaned_text:
+            cleaned_text = cleaned_text.strip()
+            # If the model wraps it in markdown code block, extract the content
+            if cleaned_text.startswith('```') and cleaned_text.endswith('```'):
+                match = re.match(r'^```(?:\w+)?\n(.*?)\n```$', cleaned_text, re.DOTALL)
+                if match:
+                    cleaned_text = match.group(1).strip()
+            return cleaned_text
+        return body
+
+    def _query_ollama(self, formatted_prompt, use_schema=True):
+        try:
+            endpoint = self.endpoint.rstrip('/')
+            if not (endpoint.endswith('/api/chat') or endpoint.endswith('/api/generate')):
+                url = f"{endpoint}/api/chat"
+            else:
+                url = endpoint
+            
+            # Format param
+            format_param = self.schema if (use_schema and self.schema) else None
+            
+            if url.endswith('/api/chat'):
+                payload = {
+                    "model": self.model,
+                    "messages": [{"role": "user", "content": formatted_prompt}],
+                    "stream": False
+                }
+                if format_param:
+                    payload["format"] = format_param
+            else:
+                payload = {
+                    "model": self.model,
+                    "prompt": formatted_prompt,
+                    "stream": False
+                }
+                if format_param:
+                    payload["format"] = format_param
+            
+            logger.debug(f"Sending query to Ollama: {url} with model {self.model}")
+            response = requests.post(url, json=payload, auth=self.auth, timeout=self.timeout)
+            response.raise_for_status()
+            
+            resp_json = response.json()
+            if 'message' in resp_json and 'content' in resp_json['message']:
+                content = resp_json['message']['content']
+            elif 'response' in resp_json:
+                content = resp_json['response']
+            else:
+                raise ValueError(f"Ollama response does not contain content or response: {resp_json}")
+            
+            return content
+        except Exception as e:
+            logger.warning(f"Ollama query failed: {e}")
+            return None
 
     def classify(self, subject, from_display, body, to_display="", cc_display="", recipients=""):
         # Hot-reload configuration if modified
@@ -424,39 +536,9 @@ class OllamaClassifier:
                 logger.warning(f"KeyError formatting Ollama prompt: {ke}. Falling back to default format.")
                 formatted_prompt = f"{self.prompt_template}\n\nFrom: {from_display}\nTo: {to_display}\nCc: {cc_display}\nSubject: {subject}\nBody: {body}"
             
-            # API endpoint selection
-            endpoint = self.endpoint.rstrip('/')
-            if not (endpoint.endswith('/api/chat') or endpoint.endswith('/api/generate')):
-                url = f"{endpoint}/api/chat"
-            else:
-                url = endpoint
-            
-            if url.endswith('/api/chat'):
-                payload = {
-                    "model": self.model,
-                    "messages": [{"role": "user", "content": formatted_prompt}],
-                    "stream": False,
-                    "format": self.schema
-                }
-            else:
-                payload = {
-                    "model": self.model,
-                    "prompt": formatted_prompt,
-                    "stream": False,
-                    "format": self.schema
-                }
-            
-            logger.debug(f"Sending request to Ollama: {url} with model {self.model}")
-            response = requests.post(url, json=payload, auth=self.auth, timeout=self.timeout)
-            response.raise_for_status()
-            
-            resp_json = response.json()
-            if 'message' in resp_json and 'content' in resp_json['message']:
-                content = resp_json['message']['content']
-            elif 'response' in resp_json:
-                content = resp_json['response']
-            else:
-                raise ValueError(f"Ollama response does not contain content or response: {resp_json}")
+            content = self._query_ollama(formatted_prompt, use_schema=True)
+            if not content:
+                return None
             
             # Extract JSON substring if wrapped in markdown or prefix text
             start_idx = content.find('{')
@@ -808,6 +890,7 @@ def transfer_emails(source_conn, dest_conn, plugins=None):
 
             # Create context dictionary for plugins to read/write
             context = {
+                "uid": uid_str,
                 "raw_email": raw_email,
                 "this_ts": this_ts,
                 "from_display": from_display,
@@ -824,6 +907,8 @@ def transfer_emails(source_conn, dest_conn, plugins=None):
                 if hasattr(plugin, 'before_transfer'):
                     try:
                         if plugin.__class__.__name__ == 'OllamaClassifier' and plugin.enabled:
+                            if getattr(plugin, 'cleanup_prompt', None):
+                                logger.info(f"UID {uid_str}: Running email text cleanup/extraction...")
                             logger.info(f"UID {uid_str}: Running Ollama classification...")
                         plugin.before_transfer(msg, context)
                     except Exception as pe:

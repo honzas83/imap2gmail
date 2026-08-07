@@ -286,6 +286,77 @@ schema:
             if os.path.exists(config_path):
                 os.remove(config_path)
 
+    @patch('requests.post')
+    def test_ollama_classifier_two_stage(self, mock_post):
+        config_path = 'test_config_two_stage.yaml'
+        config_content = """
+plugin_class: "OllamaClassifier"
+endpoint: "http://localhost:11434"
+model: "gemma4:e4b"
+cleanup_prompt: "Cleanup: {body}"
+prompt: "Classify: {body}"
+schema:
+  type: object
+  properties:
+    important:
+      type: boolean
+"""
+        with open(config_path, 'w') as f:
+            f.write(config_content)
+        
+        try:
+            classifier = OllamaClassifier(config_path)
+            self.assertTrue(classifier.enabled)
+            
+            # First response (cleanup text)
+            mock_resp_cleanup = MagicMock()
+            mock_resp_cleanup.json.return_value = {
+                "message": {
+                    "content": "Cleaned message text"
+                }
+            }
+            
+            # Second response (classification JSON)
+            mock_resp_classify = MagicMock()
+            mock_resp_classify.json.return_value = {
+                "message": {
+                    "content": '{"important": true}'
+                }
+            }
+            
+            mock_post.side_effect = [mock_resp_cleanup, mock_resp_classify]
+            
+            msg = MagicMock()
+            context = {
+                "uid": "123",
+                "subject": "Test",
+                "from_display": "sender@example.com",
+                "is_important": False,
+                "is_spam": False,
+                "tags": []
+            }
+            
+            # Mock get_email_body to return a body with replies/history
+            with patch('imap2gmail.get_email_body', return_value="Original body with quotes"):
+                classifier.before_transfer(msg, context)
+            
+            self.assertEqual(mock_post.call_count, 2)
+            
+            # First call arguments (cleanup check)
+            args1, kwargs1 = mock_post.call_args_list[0]
+            self.assertEqual(kwargs1['json']['messages'][0]['content'], "Cleanup: Original body with quotes")
+            
+            # Second call arguments (classification check)
+            args2, kwargs2 = mock_post.call_args_list[1]
+            self.assertEqual(kwargs2['json']['messages'][0]['content'], "Classify: Cleaned message text")
+            
+            # Verify result context
+            self.assertTrue(context["is_important"])
+            
+        finally:
+            if os.path.exists(config_path):
+                os.remove(config_path)
+
 class TestImap2GmailLocalSaver(unittest.TestCase):
 
     def test_sanitize_component(self):

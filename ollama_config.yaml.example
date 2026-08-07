@@ -10,6 +10,10 @@ ollama:
   # password: "mypassword"
 
 classification:
+  # Optional cleanup prompt template. If set to true, it will use the default email cleanup prompt.
+  # If set to a string, it will use the custom string. If omitted, no cleanup is performed.
+  cleanup_prompt: true
+
   # The prompt template used to query the LLM. 
   # You can use placeholders {subject}, {from_display}, {to_display}, {cc_display}, {recipients}, {body}, {current_date}, and {schema} which will be filled automatically.
   prompt: |
