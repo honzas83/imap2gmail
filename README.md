@@ -19,7 +19,7 @@ A robust Python script that continuously monitors a source IMAP account for new 
 ## Prerequisites
 
 - Python 3.12+
-- A source IMAP account (e.g., University or Work email)
+- A source IMAP account
 - A destination Gmail account
   - **Note**: You will likely need a [Gmail App Password](https://myaccount.google.com/apppasswords) if 2FA is enabled.
 - (Optional) An active Ollama instance for email classification.
@@ -107,4 +107,12 @@ On the first execution, it sets a "startup marker" at the current time. Any emai
 
 ## License
 
-MIT
+This project is licensed under the terms of the **MIT License**.
+
+### Summary of Terms
+
+*   **Permissions**: You are free to use, modify, distribute, sublicense, and sell the software for both personal and commercial purposes.
+*   **Conditions**: The original copyright notice and this permission notice must be included in all copies or substantial portions of the Software.
+*   **Warranty**: The software is provided "as is", without warranty of any kind, express or implied.
+
+See the [LICENSE](file:///Users/honzas/Prga/imap2gmail/LICENSE) file for the full license text.
