@@ -1,6 +1,14 @@
-# IMAP to Gmail Transfer Script
+# IMAP to Gmail Transfer Service (with Local LLM AI)
 
-A robust Python script that continuously monitors a source IMAP account for new emails and pushes them to a destination Gmail account.
+A robust Python service that continuously synchronizes emails from a source IMAP account to a destination Gmail account, featuring real-time **Local AI classification and tagging** powered by local LLMs via **Ollama**.
+
+## Key Highlights
+
+*   **Private & Local AI (Ollama)**: Process and classify your incoming emails entirely locally on your own machine. By leveraging local LLMs (like `gemma4:e4b-mlx` or `qwen3.5`) via Ollama, you get high-quality semantic classification, spam routing, and custom tag assignment with absolute privacy (no email content is sent to third-party APIs) at zero cost.
+*   **Continuous & Reliable Sync**: Runs continuously in a background loop with active, persistent IMAP connections to keep latency low.
+*   **Smart Spam Routing**: Automatically routes emails classified as spam by the local LLM directly to Gmail's `[Gmail]/Spam` folder, keeping your Inbox clean.
+*   **Automatic Custom Labeling**: Automatically applies custom tags and labels to your Gmail messages using Gmail's IMAP metadata extension (`+X-GM-LABELS`) based on LLM outputs.
+*   **Double-Check Tracking**: Combines source IMAP UIDs and internal email dates in a persistent SQLite database to ensure exactly-once transfer and complete drop-resilience.
 
 ## Features
 
@@ -15,6 +23,7 @@ A robust Python script that continuously monitors a source IMAP account for new 
   - Supports an optional two-stage pipeline: cleans up previous message history (quotes/forwards) before executing classification.
   - Hot-reloads configuration YAML changes dynamically on the fly.
   - Beautiful colorized, multi-line card logging on the terminal separating email metadata from LLM outputs.
+
 
 ## Prerequisites
 
