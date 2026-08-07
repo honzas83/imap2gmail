@@ -308,6 +308,7 @@ class OllamaClassifier:
         self.schema = None
         self.enabled = False
         self.timeout = 30
+        self.max_body_chars = 8192
         self.last_loaded_mtime = 0
         
         if yaml is None:
@@ -344,6 +345,7 @@ class OllamaClassifier:
                     self.cleanup_prompt = None
                 self.schema = self.config.get('schema', DEFAULT_SCHEMA)
                 self.timeout = int(self.config.get('timeout', 30))
+                self.max_body_chars = int(self.config.get('max_body_chars', 8192))
             else:
                 ollama_cfg = self.config.get('ollama', {})
                 self.endpoint = ollama_cfg.get('endpoint', 'http://localhost:11434')
@@ -361,6 +363,7 @@ class OllamaClassifier:
                 else:
                     self.cleanup_prompt = None
                 self.schema = classification_cfg.get('schema', DEFAULT_SCHEMA)
+                self.max_body_chars = int(classification_cfg.get('max_body_chars', 8192))
             
             # Auth
             if username and password:
@@ -385,7 +388,7 @@ class OllamaClassifier:
         
         # Extract body
         body = get_email_body(msg)
-        body_truncated = body[:4000]
+        body_truncated = body[:self.max_body_chars]
         
         # Extract recipients
         raw_to = msg.get('To', '')
